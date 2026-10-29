@@ -1,117 +1,126 @@
+import argparse
 from pathlib import Path
 
-import argparse
 import cv2
+import numpy as np
 
-CHANNEL = 1
-COLUNA = 30
-LINHA = 30
+# Region of interest settings.
+ROI_X = 30
+ROI_Y = 30
+ROI_WIDTH = 50
+ROI_HEIGHT = 50
+CHANNEL = "G"
 
-
-# Faz um bitshift em uma string
-def pad_binary(b: str) -> str:
-	if len(b) == 8:
-		return b
-	if len(b) < 8:
-		diff = 8 - len(b)
-		return "0" * diff + b
+# OpenCV stores color channels in BGR order.
+CHANNELS = {"B": 0, "G": 1, "R": 2}
 
 
-# Faz o processo de esteganografia em uma imagem
-def steg(text: str, img_in: Path, img_out: Path) -> None:
-	img = cv2.imread(str(img_in), cv2.IMREAD_COLOR)
-	linhas, colunas, canais = img.shape
-	if not (linhas > LINHA and COLUNA < colunas):
-		raise EOFError("Dimensão da imagem não permite")
-	print(colunas, linhas, canais)
-	if type(img) == None:
-		raise EOFError(f"Arquivo '{img_in}' não encontrado")
-
-	total_bits = 0
-	ch_to_hide = ""
-	for ch in text:
-		# Removendo "0b" no início da conversão
-		# Ex: 0b100101 -> 100101
-		bin_char = bin(ord(ch))[2:]
-		# Adiciona mais zeros se a quantidade de bits for
-		# menor que 8
-		bin_char = pad_binary(bin_char)
-		# Concatena sequência de bits
-		ch_to_hide += bin_char
-		# Computa total de bits
-		total_bits += len(bin_char)
-
-	img_steg = img.copy()
-	linha = LINHA
-	coluna = COLUNA
-	for i in range(len(ch_to_hide)):
-		if coluna == colunas:
-			coluna = COLUNA
-			linha += 1
-		# Faz a operação bitwise and com a flag 1
-		if int(ch_to_hide[i]) & 1:
-			# Concatena bit
-			img_steg[linha, coluna, CHANNEL] = img_steg[linha, coluna, CHANNEL] | 1
-		else:
-			# Concatena bit
-			img_steg[linha, coluna, CHANNEL] = (
-				img_steg[linha, coluna, CHANNEL] & 0xFE
-			)
-		coluna += 1
-
-	print(f"Escondendo mensagem '{text}' na imagem {img_out.resolve()}")
-	print(f"Transformando em '{ch_to_hide}'")
-	# Salva imagem no disco
-	cv2.imwrite(str(img_out), img_steg)
+def validate_roi(image):
+    """Ensure the region of interest fits inside the image."""
+    height, width = image.shape[:2]
+    if ROI_X + ROI_WIDTH > width or ROI_Y + ROI_HEIGHT > height:
+        raise ValueError(
+            f"Region of interest is outside the image. "
+            f"Image size: {width}x{height} (width x height)."
+        )
 
 
-# Faz o processo reverso da esteganografia de uma imagem
-def unsteg(img_path: str, n_bytes: int) -> None:
-	# Carrega imagem
-	img_steg = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
-	linhas, colunas, canais = img_steg.shape
-	if type(img_steg) == None:
-		raise EOFError(f"Arquivo '{img_path}' não encontrado")
-	# Passa por todos pela quantidade de caracteres * bits (8)
-	bits = ""
-	linha = LINHA
-	coluna = COLUNA
-	for i in range(n_bytes * 8):
-		if coluna == colunas:
-			linha += 1
-			coluna = COLUNA
-		# Adiciona o bit alterado fazendo a operação bitwise and (&)
-		bits += str(img_steg[linha, coluna, CHANNEL] & 1)
-		coluna += 1
+def hide_secret(cover_path, secret_path, output_path):
+    cover = cv2.imread(str(cover_path), cv2.IMREAD_COLOR)
+    if cover is None:
+        raise FileNotFoundError(f"Could not read cover image: {cover_path}")
 
-	last_i = 0
-	msg_escondida = ""
-	# Itera de 8 em 8 bits (1 byte)
-	for i in range(8, len(bits) + 8, 8):
-		# Pega o caractere na região last_i até i e
-		# transforma para número inteiro na base 2
-		char_ascii = int(bits[last_i:i], base=2)
-		# Converte o valor inteiro para o caractere correspondente da
-		# tabela ASCII
-		char_ascii = chr(char_ascii)
-		# Altera o último índice
-		if last_i != i:
-			last_i = i
-		# Adiciona o caractere a mensagem escondida
-		msg_escondida += char_ascii
-	print(msg_escondida)
+    secret = cv2.imread(str(secret_path), cv2.IMREAD_GRAYSCALE)
+    if secret is None:
+        raise FileNotFoundError(f"Could not read secret image: {secret_path}")
 
-PARSER = argparse.ArgumentParser(prog='Least Significant Bit')
-PARSER.add_argument('-i', '--input-img', required=True, help='Caminho absoluto da imagem que você quer esconder alguma informação')
-PARSER.add_argument('-o', '--output-img', help='Caminho absoluto de onde você quer salvar a imagem com uma informação escondida')
-PARSER.add_argument('-m', '--message', help='Texto à ser escondido na imagem')
-PARSER.add_argument('-n', '--n-bytes', help='Especifica a quantidade de bytes que você quer decodificar caso a flag \'hide\' esteja setada')
-PARSER.add_argument('--hide', help='Flag para indicar se você quer esconder ou revelar uma mensagem de uma imagem', action=argparse.BooleanOptionalAction)
-PARSER.set_defaults(hide=False)
+    validate_roi(cover)
 
-if __name__ == '__main__':
-    args = PARSER.parse_args()
-    if args.hide == True:
-        steg(args.message, Path(args.input_img), Path(args.output_img))
+    secret = cv2.resize(secret, (ROI_WIDTH, ROI_HEIGHT))
+    bits = (secret > 127).astype(np.uint8)
+
+    channel_index = CHANNELS[CHANNEL]
+    roi = cover[
+        ROI_Y : ROI_Y + ROI_HEIGHT,
+        ROI_X : ROI_X + ROI_WIDTH,
+        channel_index,
+    ]
+    cover[
+        ROI_Y : ROI_Y + ROI_HEIGHT,
+        ROI_X : ROI_X + ROI_WIDTH,
+        channel_index,
+    ] = (roi & 0xFE) | bits
+
+    # PNG is lossless, so it preserves the embedded least significant bits.
+    cv2.imwrite(str(output_path), cover)
+    print(f"Secret image hidden in '{output_path}'")
+
+
+def reveal_secret(stego_path, output_path):
+    stego = cv2.imread(str(stego_path), cv2.IMREAD_COLOR)
+    if stego is None:
+        raise FileNotFoundError(f"Could not read stego image: {stego_path}")
+
+    validate_roi(stego)
+
+    channel_index = CHANNELS[CHANNEL]
+    roi = stego[
+        ROI_Y : ROI_Y + ROI_HEIGHT,
+        ROI_X : ROI_X + ROI_WIDTH,
+        channel_index,
+    ]
+    bits = roi & 1
+    secret = (bits * 255).astype(np.uint8)
+
+    cv2.imwrite(str(output_path), secret)
+    print(f"Secret image extracted to '{output_path}'")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Hide and extract images using LSB steganography."
+    )
+    parser.add_argument(
+        "--hide",
+        action="store_true",
+        help="Hide the secret image. Extract it when this flag is omitted.",
+    )
+    parser.add_argument(
+        "-i",
+        "--input-image",
+        "--input-img",
+        dest="input_image",
+        required=True,
+        help="Cover image when hiding; stego image when extracting.",
+    )
+    parser.add_argument(
+        "-s",
+        "--secret-image",
+        "--secret-img",
+        dest="secret_image",
+        help="Secret image to hide (required with --hide).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-image",
+        "--output-img",
+        dest="output_image",
+        required=True,
+        help="Output stego image when hiding; extracted image otherwise.",
+    )
+    args = parser.parse_args()
+
+    if args.hide:
+        if not args.secret_image:
+            parser.error("--hide requires --secret-image")
+        hide_secret(
+            Path(args.input_image),
+            Path(args.secret_image),
+            Path(args.output_image),
+        )
     else:
-        unsteg(Path(args.input_img), int(args.n_bytes))
+        reveal_secret(Path(args.input_image), Path(args.output_image))
+
+
+if __name__ == "__main__":
+    main()
