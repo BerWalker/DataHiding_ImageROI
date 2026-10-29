@@ -2,7 +2,6 @@ import argparse
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 # Region of interest settings.
 ROI_X = 30
@@ -37,7 +36,7 @@ def hide_secret(cover_path, secret_path, output_path):
     validate_roi(cover)
 
     secret = cv2.resize(secret, (ROI_WIDTH, ROI_HEIGHT))
-    bits = (secret > 127).astype(np.uint8)
+    bits = (secret > 127).astype("uint8")
 
     channel_index = CHANNELS[CHANNEL]
     roi = cover[
@@ -70,7 +69,7 @@ def reveal_secret(stego_path, output_path):
         channel_index,
     ]
     bits = roi & 1
-    secret = (bits * 255).astype(np.uint8)
+    secret = (bits * 255).astype("uint8")
 
     cv2.imwrite(str(output_path), secret)
     print(f"Secret image extracted to '{output_path}'")
