@@ -1,50 +1,57 @@
-# Image Steganography
+# DWT Image Watermarking
 
-This project hides a grayscale secret image in the least significant bits (LSBs)
-of a selected color channel in a cover image. The secret image is resized to
-the configured region of interest (ROI) and converted to black and white before
-embedding.
+This project embeds a grayscale secret image in a color cover image using a
+two-level Haar discrete wavelet transform (DWT). The secret image is resized to
+50x50 pixels and converted to black and white before embedding. Each bit is
+spread across multiple image coefficients using a fixed key, so extraction
+does not require the original cover image.
 
 ## Requirements
 
 - Python 3
 - Packages listed in `requirements.txt`
 
-Install the dependencies:
+Install the dependencies from the project root:
 
-```powershell
+```bash
 python -m pip install -r requirements.txt
 ```
 
-## Run a smoke test
+## Embed and extract a watermark
 
-The sample cover and secret images are in `images/input/`. Run these commands
-from the project root:
+The sample cover and secret images are in `images/input/`. Embed the watermark
+and then extract it with:
 
-```powershell
-python main.py --hide --input-image images/input/cover.jpg --secret-image images/input/secret.png --output-image images/output/stego.png
+```bash
+python main.py --hide --input-image images/input/cover.png --secret-image images/input/secret.png --output-image images/output/stego.png
 python main.py --input-image images/output/stego.png --output-image images/output/recovered_secret.png
 ```
 
-The first command embeds the secret image. The second extracts it. Compare
-`images/output/recovered_secret.png` with the original secret image after
-resizing and thresholding; the recovered image is the binary version used for
-embedding.
+The extracted image is a binary 50x50 version of the secret. Use PNG for the
+watermarked image because lossy formats such as JPEG can damage the watermark.
 
-## Command reference
+The watermark size, key, and strength are configured by `WM_SIZE`, `KEY`, and
+`STRENGTH` in `main.py`.
 
-Hide an image:
+## Test robustness
 
-```powershell
-python main.py --hide -i <cover-image> -s <secret-image> -o <stego-output.png>
+Run the robustness script to test the watermark with Gaussian noise, scribbles,
+and downscaling/upscaling:
+
+```bash
+python test.py --cover images/input/cover.png --secret images/input/secret.png --out-dir images/output
 ```
 
-Extract an image:
+The script writes the watermarked image, each attacked image, and each
+extracted watermark to the output directory. It reports the bit error rate
+(BER); an attack passes when the BER is at most 0.20. The script exits with a
+non-zero status if any attack fails.
 
-```powershell
-python main.py -i <stego-image> -o <recovered-image.png>
+## Analyze image texture
+
+`lbp.py` compares pixel and Local Binary Pattern (LBP) statistics and
+histograms for a cover image and its watermarked version:
+
+```bash
+python lbp.py --cover images/input/cover.png --stego images/output/stego.png --output images/output/histograms.png
 ```
-
-Use PNG for the stego image because lossy formats such as JPEG can destroy the
-embedded bits. The ROI position, size, and color channel are configured by
-`ROI_X`, `ROI_Y`, `ROI_WIDTH`, `ROI_HEIGHT`, and `CHANNEL` in `main.py`.
